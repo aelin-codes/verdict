@@ -69,7 +69,7 @@ runs:
 
     - name: Install Verdict
       shell: bash
-      run: pip install --quiet 'verdict[api]'
+      run: pip install --quiet 'verdict-agent[api]'
 
     - name: Run Verdict
       id: run

@@ -3,16 +3,16 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.backends.legacy:build"
 
 [project]
-name = "verdict"
+name = "verdict-agent"
 version = "0.1.0"
-description = "Lie detector for coding agents."
+description = "Lie detector for coding agents — scans git diffs and returns PASS / SUSPICIOUS / LIED."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
 authors = [
     { name = "Verdict Contributors" },
 ]
-keywords = ["ai", "agents", "testing", "git", "verification"]
+keywords = ["ai", "agents", "testing", "git", "verification", "lie-detector"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -44,9 +44,9 @@ all = ["verdict[api]", "verdict[dev]"]
 verdict = "verdict.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/verdict-dev/verdict"
-Repository = "https://github.com/verdict-dev/verdict"
-Issues = "https://github.com/verdict-dev/verdict/issues"
+Homepage = "https://github.com/aelin-codes/verdict"
+Repository = "https://github.com/aelin-codes/verdict"
+Issues = "https://github.com/aelin-codes/verdict/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

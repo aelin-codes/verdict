@@ -9,7 +9,7 @@ Verdict scans the git diff after any agent claims completion, runs static and dy
 ## Quick start
 
 ```bash
-pip install 'verdict[api]'
+pip install 'verdict-agent[api]'
 
 # Run a check
 verdict check --repo /path/to/repo --claim "Refactored the auth module"
