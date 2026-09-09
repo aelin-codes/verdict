@@ -1,0 +1,13 @@
+{
+  "buildCommand": "echo 'static site'",
+  "outputDirectory": ".",
+  "devCommand": "echo 'static site'",
+  "installCommand": "echo 'no install needed'",
+  "framework": null,
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/verdict.html"
+    }
+  ]
+}

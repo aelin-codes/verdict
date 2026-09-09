@@ -1,0 +1,9 @@
+# Enforce Unix line endings in the repo for everyone
+* text=auto eol=lf
+
+# Binary files — never touch
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.whl binary

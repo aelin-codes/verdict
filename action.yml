@@ -1,0 +1,124 @@
+name: Verdict Check
+description: >
+  Lie detector for coding agents. Scans the git diff, runs AST and
+  live-trace checks, and fails the workflow on LIED or SUSPICIOUS.
+
+author: verdict-dev
+
+branding:
+  icon: check-circle
+  color: blue
+
+inputs:
+  claim:
+    description: The agent's natural-language completion statement.
+    required: true
+
+  repo_path:
+    description: Path to the git repository (relative to workspace root).
+    required: false
+    default: "."
+
+  base_ref:
+    description: Git ref to diff against.
+    required: false
+    default: HEAD
+
+  compare_ref:
+    description: Optional second ref (e.g. origin/main).
+    required: false
+    default: ""
+
+  run_tests:
+    description: Run the test suite under sys.settrace for live coverage.
+    required: false
+    default: "false"
+
+  fail_on:
+    description: |
+      Minimum verdict level that causes the step to fail.
+      Options: LIED (default) | SUSPICIOUS | never
+    required: false
+    default: LIED
+
+  python_version:
+    description: Python version to use.
+    required: false
+    default: "3.12"
+
+outputs:
+  verdict:
+    description: "PASS, SUSPICIOUS, or LIED"
+    value: ${{ steps.run.outputs.verdict }}
+
+  explanation:
+    description: Human-readable explanation of the verdict.
+    value: ${{ steps.run.outputs.explanation }}
+
+  citations:
+    description: JSON array of file:line citations.
+    value: ${{ steps.run.outputs.citations }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: Install Verdict
+      shell: bash
+      run: pip install --quiet 'verdict[api]'
+
+    - name: Run Verdict
+      id: run
+      shell: bash
+      env:
+        VERDICT_CLAIM: ${{ inputs.claim }}
+        VERDICT_REPO:  ${{ inputs.repo_path }}
+        VERDICT_BASE:  ${{ inputs.base_ref }}
+        VERDICT_CMP:   ${{ inputs.compare_ref }}
+        VERDICT_TESTS: ${{ inputs.run_tests }}
+        VERDICT_FAIL:  ${{ inputs.fail_on }}
+      run: |
+        EXTRA_ARGS=""
+        [ -n "$VERDICT_CMP" ] && EXTRA_ARGS="--compare $VERDICT_CMP"
+        [ "$VERDICT_TESTS" = "true" ] && EXTRA_ARGS="$EXTRA_ARGS --run-tests"
+
+        set +e
+        JSON=$(verdict check \
+          --repo   "$VERDICT_REPO" \
+          --claim  "$VERDICT_CLAIM" \
+          --base   "$VERDICT_BASE" \
+          --json   \
+          $EXTRA_ARGS)
+        EXIT=$?
+        set -e
+
+        LEVEL=$(echo "$JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['verdict'])")
+        EXPL=$(echo  "$JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['explanation'])")
+        CITS=$(echo  "$JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); print(json.dumps(d['citations']))")
+
+        echo "verdict=$LEVEL"      >> "$GITHUB_OUTPUT"
+        echo "explanation=$EXPL"   >> "$GITHUB_OUTPUT"
+        echo "citations=$CITS"     >> "$GITHUB_OUTPUT"
+
+        echo ""
+        echo "### Verdict: $LEVEL" >> "$GITHUB_STEP_SUMMARY"
+        echo "$EXPL"               >> "$GITHUB_STEP_SUMMARY"
+        echo ""                    >> "$GITHUB_STEP_SUMMARY"
+        echo "$JSON" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for c in d.get('citations', []):
+    print(f\"- {c['file']}:{c['line_start']}  {c['reason']}\")
+" >> "$GITHUB_STEP_SUMMARY"
+
+        if [ "$VERDICT_FAIL" = "never" ]; then
+          exit 0
+        elif [ "$VERDICT_FAIL" = "SUSPICIOUS" ] && [ "$LEVEL" != "PASS" ]; then
+          exit 1
+        elif [ "$VERDICT_FAIL" = "LIED" ] && [ "$LEVEL" = "LIED" ]; then
+          exit 1
+        fi
