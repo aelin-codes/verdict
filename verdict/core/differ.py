@@ -106,11 +106,15 @@ def extract_mentioned_paths(claim: str, repo_path: str) -> list[str]:
         raw = m.group()
         # try exact match first
         p = repo / raw
-        if p.exists():
-            candidates.append(Path(raw).as_posix())
+        if p.exists() and p.is_file():
+            candidates.append(p.relative_to(repo).as_posix())
             continue
-        # search recursively
-        hits = list(repo.rglob(Path(raw).name))
+        # search recursively for matching path suffix
+        raw_norm = Path(raw).as_posix().lower()
+        hits = [
+            h for h in repo.rglob(Path(raw).name)
+            if h.is_file() and h.relative_to(repo).as_posix().lower().endswith(raw_norm)
+        ]
         if hits:
             candidates.append(hits[0].relative_to(repo).as_posix())
 

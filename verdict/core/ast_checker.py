@@ -232,12 +232,10 @@ def _analyze_file(
     # symbols the claim mentions that don't appear in this file
     absent = mentioned_symbols & {s for s in mentioned_symbols if s not in defined_names}
     for sym in absent:
-        # Only flag if symbol looks like an identifier (snake_case with underscore or camelCase)
-        is_camel = bool(re.match(r"^[a-z]+[A-Z][a-zA-Z0-9]*$", sym)) or (
-            bool(re.match(r"^[A-Z][a-zA-Z0-9]+$", sym)) and sym.lower() not in _STOP_WORDS
-        )
         is_snake = "_" in sym
-        if is_snake or is_camel:
+        is_camel = bool(re.match(r"^[a-z]+[A-Z][a-zA-Z0-9]*$", sym))
+        is_pascal = bool(re.match(r"^[A-Z][a-z0-9]+[A-Z][a-zA-Z0-9]*$", sym))
+        if is_snake or is_camel or is_pascal:
             flags.append(ASTFlag(
                 file=rel_path,
                 line=1,
