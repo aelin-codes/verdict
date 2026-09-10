@@ -19,10 +19,25 @@ _CYAN   = "\033[0;36m"
 _DIM    = "\033[2m"
 _RESET  = "\033[0m"
 
+def _supports_unicode() -> bool:
+    encoding = getattr(sys.stdout, "encoding", None) or ""
+    return "utf" in encoding.lower()
+
+
+_USE_UNICODE = _supports_unicode()
+_BULLET   = "✦" if _USE_UNICODE else "*"
+_FLAG     = "⚑" if _USE_UNICODE else "[!]"
+_CHECK    = "✔" if _USE_UNICODE else "[PASS]"
+_CROSS    = "✘" if _USE_UNICODE else "[FAIL]"
+_ERR_MARK = "✖" if _USE_UNICODE else "[ERR]"
+_DASH     = "—" if _USE_UNICODE else "-"
+_ARROW    = "→" if _USE_UNICODE else "->"
+
 _LEVEL_COLOR = {
     VerdictLevel.PASS:       _GREEN,
     VerdictLevel.SUSPICIOUS: _ORANGE,
     VerdictLevel.LIED:       _RED,
+    VerdictLevel.ERROR:      _RED,
 }
 
 
@@ -37,7 +52,7 @@ def cli() -> None:
 @click.option("--claim", "-c", required=True, help="The agent's completion claim.")
 @click.option("--base", default="HEAD", show_default=True, help="Base git ref to diff against.")
 @click.option("--compare", default=None, help="Optional second ref (e.g. origin/main).")
-@click.option("--run-tests", is_flag=True, default=False, help="Run tests under sys.settrace.")
+@click.option("--run-tests", is_flag=True, default=False, help="Run test suite and verify coverage.")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output raw JSON.")
 @click.option("--no-color", is_flag=True, default=False, help="Disable ANSI colour output.")
 def check(
@@ -64,17 +79,20 @@ def check(
 
     if output_json:
         click.echo(json.dumps(result.to_dict(), indent=2))
+        if result.level == VerdictLevel.ERROR:
+            sys.exit(2)
         sys.exit(0 if result.level == VerdictLevel.PASS else 1)
 
     # ── human-readable output ───────────────────────────────────────────────
     def c(color: str, text: str) -> str:
         return f"{color}{text}{_RESET}" if not no_color else text
 
+    cmp_str = f" ({base}{(' ' + _ARROW + ' ' + compare) if compare else ''})"
     click.echo()
-    click.echo(c(_DIM, f"  ✦  Running static analysis  (AST parse)"))
-    click.echo(c(_DIM, f"  ✦  Scanning git diff         ({base}{' → ' + compare if compare else ''})"))
+    click.echo(c(_DIM, f"  {_BULLET}  Running static analysis  (AST parse)"))
+    click.echo(c(_DIM, f"  {_BULLET}  Scanning git diff        {cmp_str}"))
     if run_tests:
-        click.echo(c(_DIM, "  ✦  Attaching live trace      (sys.settrace)"))
+        click.echo(c(_DIM, f"  {_BULLET}  Running test coverage    (LCOV)"))
     click.echo()
 
     for d in result.diff_summary:
@@ -85,14 +103,21 @@ def check(
     if result.citations:
         click.echo()
         for cit in result.citations:
-            click.echo(c(_ORANGE, f"  ⚑ {cit}"))
+            click.echo(c(_ORANGE, f"  {_FLAG} {cit}"))
 
     click.echo()
-    level_color = _LEVEL_COLOR[result.level]
-    mark = "✔" if result.level == VerdictLevel.PASS else "✘"
-    click.echo(f"  {c(level_color, mark + '  ' + result.level.value)}  {c(_DIM, '— ' + result.explanation)}")
+    level_color = _LEVEL_COLOR.get(result.level, _RED)
+    if result.level == VerdictLevel.PASS:
+        mark = _CHECK
+    elif result.level == VerdictLevel.ERROR:
+        mark = _ERR_MARK
+    else:
+        mark = _CROSS
+    click.echo(f"  {c(level_color, mark + '  ' + result.level.value)}  {c(_DIM, _DASH + ' ' + result.explanation)}")
     click.echo()
 
+    if result.level == VerdictLevel.ERROR:
+        sys.exit(2)
     sys.exit(0 if result.level == VerdictLevel.PASS else 1)
 
 

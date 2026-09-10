@@ -8,6 +8,18 @@ from pathlib import Path
 from .models import FileDiff
 
 
+def _is_git_repo(repo: Path) -> bool:
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+        )
+        return res.returncode == 0 and "true" in res.stdout.strip().lower()
+    except Exception:
+        return False
+
+
 def get_diff(repo_path: str, base: str = "HEAD", compare: str | None = None) -> list[FileDiff]:
     """
     Return a list of FileDiff objects for every changed file.
@@ -19,7 +31,7 @@ def get_diff(repo_path: str, base: str = "HEAD", compare: str | None = None) -> 
                    compares the working tree against *base*.
     """
     repo = Path(repo_path).resolve()
-    if not (repo / ".git").exists():
+    if not _is_git_repo(repo):
         raise ValueError(f"Not a git repository: {repo}")
 
     cmd = ["git", "-C", str(repo), "diff", "--unified=0", "--no-color"]
@@ -32,12 +44,41 @@ def get_diff(repo_path: str, base: str = "HEAD", compare: str | None = None) -> 
     if result.returncode not in (0, 1):
         raise RuntimeError(f"git diff failed: {result.stderr.strip()}")
 
-    return _parse_unified_diff(result.stdout)
+    diffs = _parse_unified_diff(result.stdout)
+    tracked_paths = {d.path for d in diffs}
+
+    # When comparing working tree against base (default HEAD), also detect untracked new files
+    if compare is None:
+        untracked_cmd = ["git", "-C", str(repo), "ls-files", "--others", "--exclude-standard"]
+        untracked_res = subprocess.run(untracked_cmd, capture_output=True, text=True)
+        if untracked_res.returncode == 0 and untracked_res.stdout.strip():
+            for line in untracked_res.stdout.splitlines():
+                rel_untracked = Path(line.strip()).as_posix()
+                if rel_untracked and rel_untracked not in tracked_paths:
+                    file_path = repo / rel_untracked
+                    added = 0
+                    if file_path.is_file():
+                        try:
+                            added = sum(1 for _ in file_path.open("rb"))
+                        except Exception:
+                            added = 1
+                    diffs.append(
+                        FileDiff(
+                            path=rel_untracked,
+                            added=added,
+                            removed=0,
+                            hunks=[f"@@ -0,0 +1,{max(1, added)} @@"],
+                        )
+                    )
+
+    return diffs
 
 
 def get_staged_diff(repo_path: str) -> list[FileDiff]:
     """Return diffs for staged (index) changes."""
     repo = Path(repo_path).resolve()
+    if not _is_git_repo(repo):
+        raise ValueError(f"Not a git repository: {repo}")
     cmd = ["git", "-C", str(repo), "diff", "--cached", "--unified=0", "--no-color"]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode not in (0, 1):
@@ -45,26 +86,33 @@ def get_staged_diff(repo_path: str) -> list[FileDiff]:
     return _parse_unified_diff(result.stdout)
 
 
+_EXTENSION_PATTERN = (
+    r"[\w./\-]+\.(?:py|tsx?|jsx?|vue|svelte|mjs|cjs|go|rs|java|rb|cs|cpp|c|h|"
+    r"json|ya?ml|toml|sql|html|css|scss|sh)"
+)
+
+
 def extract_mentioned_paths(claim: str, repo_path: str) -> list[str]:
     """
     Scan the claim text for file paths that actually exist in the repo.
     Handles bare filenames, dotted module paths, and slash-separated paths.
+    Always returns normalized POSIX paths.
     """
     repo = Path(repo_path).resolve()
     candidates: list[str] = []
 
-    # match things that look like paths: foo/bar.py, src/auth/session.py, tokens.py
-    for m in re.finditer(r"[\w./\-]+\.(?:py|ts|js|go|rs|java|rb|cs|cpp|c|h)", claim):
+    # match things that look like paths
+    for m in re.finditer(_EXTENSION_PATTERN, claim, re.I):
         raw = m.group()
         # try exact match first
         p = repo / raw
         if p.exists():
-            candidates.append(raw)
+            candidates.append(Path(raw).as_posix())
             continue
         # search recursively
         hits = list(repo.rglob(Path(raw).name))
         if hits:
-            candidates.append(str(hits[0].relative_to(repo)))
+            candidates.append(hits[0].relative_to(repo).as_posix())
 
     return list(dict.fromkeys(candidates))  # deduplicate, preserve order
 
@@ -84,7 +132,7 @@ def _parse_unified_diff(raw: str) -> list[FileDiff]:
         if m:
             if current:
                 diffs.append(current)
-            current = FileDiff(path=m.group(2), added=0, removed=0)
+            current = FileDiff(path=Path(m.group(2)).as_posix(), added=0, removed=0)
             continue
 
         if current is None:

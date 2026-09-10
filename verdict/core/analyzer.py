@@ -41,10 +41,17 @@ def analyze(
     try:
         diffs: list[FileDiff] = get_diff(repo, base=base_ref, compare=compare_ref)
     except Exception as exc:  # noqa: BLE001
-        diffs = []
-        static_flags = [f"Could not read git diff: {exc}"]
-    else:
-        static_flags: list[str] = []
+        return VerdictResult(
+            level=VerdictLevel.ERROR,
+            claim=claim,
+            citations=[],
+            static_flags=[f"Could not read git diff: {exc}"],
+            trace_flags=[],
+            diff_summary=[],
+            explanation=f"Could not read git diff: {exc}",
+        )
+
+    static_flags: list[str] = []
 
     changed_paths = [d.path for d in diffs]
     mentioned_paths = extract_mentioned_paths(claim, repo)

@@ -81,3 +81,31 @@ def test_test_file_with_functions(tmp_path, py_file):
         "added tests", str(tmp_path), ["test_auth.py"]
     )
     assert flags == []
+
+
+def test_claim_stop_words_and_filename_not_flagged(tmp_path, py_file):
+    from verdict.core.ast_checker import check_claim_against_ast
+    py_file("backend_helper.py", """
+        def helper_func():
+            return 42
+    """)
+    flags = check_claim_against_ast(
+        "Added helper_func in scripts/backend_helper.py",
+        str(tmp_path),
+        ["backend_helper.py"],
+    )
+    assert flags == []
+
+
+def test_detect_stub_polyglot_ts(tmp_path):
+    ts_file = tmp_path / "authService.ts"
+    ts_file.write_text("export function loginUser() {\n  // empty\n}\n")
+    flags = detect_stub_implementations(str(tmp_path), ["authService.ts"])
+    assert any("loginUser" in f.reason for f in flags)
+
+
+def test_check_missing_test_coverage_polyglot_ts(tmp_path):
+    test_file = tmp_path / "auth.test.ts"
+    test_file.write_text("describe('auth', () => { it('works', () => {}); });\n")
+    flags = check_missing_test_coverage("added unit tests", str(tmp_path), ["auth.test.ts"])
+    assert flags == []

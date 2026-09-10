@@ -1,26 +1,16 @@
-"""Live execution tracer using sys.settrace."""
+"""Live execution and test coverage analyzer using LCOV format."""
 from __future__ import annotations
 
-import sys
-import importlib
-import importlib.util
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import Callable
 
 
 class CoverageTrace:
     """
-    A lightweight sys.settrace-based coverage recorder.
-
-    Usage::
-
-        tracer = CoverageTrace(watch_dir="/repo/src")
-        tracer.start()
-        # ... run code ...
-        tracer.stop()
-        hit = tracer.executed_lines  # {"src/auth.py": {10, 11, 14}}
+    Compatibility wrapper for in-process coverage tracing.
     """
 
     def __init__(self, watch_dir: str):
@@ -30,25 +20,54 @@ class CoverageTrace:
 
     def start(self) -> None:
         self._prev_trace = sys.gettrace()
-        sys.settrace(self._trace_calls)
 
     def stop(self) -> None:
         sys.settrace(self._prev_trace)
 
-    def _trace_calls(self, frame, event, arg):  # noqa: ANN001
-        filename = frame.f_code.co_filename
-        if not filename.startswith(self.watch_dir):
-            return None
-        if event == "call":
-            return self._trace_lines
-        return None
 
-    def _trace_lines(self, frame, event, arg):  # noqa: ANN001
-        if event == "line":
-            filename = frame.f_code.co_filename
-            rel = os.path.relpath(filename, self.watch_dir)
-            self.executed_lines.setdefault(rel, set()).add(frame.f_lineno)
-        return self._trace_lines
+def parse_lcov(lcov_path: Path | str, repo_root: Path) -> dict[str, set[int]]:
+    """
+    Parse a standard LCOV coverage file into:
+    relative_posix_path -> set of executed line numbers.
+    """
+    path = Path(lcov_path)
+    if not path.is_file():
+        return {}
+
+    executed: dict[str, set[int]] = {}
+    current_file: str | None = None
+
+    try:
+        content = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return {}
+
+    for line in content.splitlines():
+        line = line.strip()
+        if line.startswith("SF:"):
+            raw_path = line[3:].strip()
+            p = Path(raw_path)
+            if p.is_absolute():
+                try:
+                    current_file = p.relative_to(repo_root).as_posix()
+                except ValueError:
+                    current_file = p.as_posix()
+            else:
+                current_file = p.as_posix()
+        elif line.startswith("DA:") and current_file:
+            parts = line[3:].split(",")
+            if len(parts) >= 2:
+                try:
+                    lineno = int(parts[0])
+                    hits = int(parts[1])
+                    if hits > 0:
+                        executed.setdefault(current_file, set()).add(lineno)
+                except ValueError:
+                    pass
+        elif line == "end_of_record":
+            current_file = None
+
+    return executed
 
 
 def run_tests_with_trace(
@@ -56,68 +75,43 @@ def run_tests_with_trace(
     test_command: list[str] | None = None,
 ) -> dict[str, set[int]]:
     """
-    Run the test suite inside the repo and collect executed lines via
-    subprocess + coverage (preferred) or a fresh sys.settrace session.
-
-    Returns a mapping of relative file path -> set of executed line numbers.
+    Run tests and collect executed lines via standard LCOV coverage format.
+    Auto-detects test runners (npm/Jest, pytest, Go) and parses lcov.info.
     """
     repo = Path(repo_path).resolve()
 
-    # Prefer running pytest with --tb=no for speed
-    cmd = test_command or ["python", "-m", "pytest", "--tb=no", "-q"]
+    if test_command:
+        cmd = test_command
+    elif (repo / "package.json").exists():
+        cmd = ["npm", "test", "--", "--coverage", "--coverageReporters=lcov"]
+    elif (repo / "go.mod").exists():
+        cmd = ["go", "test", "-coverprofile=coverage.out", "./..."]
+    else:
+        cmd = ["python", "-m", "pytest", "--cov=.", "--cov-report=lcov", "--tb=no", "-q"]
 
-    # We emit a small tracing shim so we don't need to instrument the subprocess
-    shim = repo / ".verdict_trace_shim.py"
-    trace_out = repo / ".verdict_trace.txt"
-
-    shim_code = f'''
-import sys, os, json
-
-_executed = {{}}
-_watch = {str(repo)!r}
-
-def _trace_calls(frame, event, arg):
-    fn = frame.f_code.co_filename
-    if fn.startswith(_watch) and event == "call":
-        return _trace_lines
-    return None
-
-def _trace_lines(frame, event, arg):
-    if event == "line":
-        fn = frame.f_code.co_filename
-        rel = os.path.relpath(fn, _watch)
-        _executed.setdefault(rel, []).append(frame.f_lineno)
-    return _trace_lines
-
-sys.settrace(_trace_calls)
-import atexit
-
-def _dump():
-    sys.settrace(None)
-    with open({str(trace_out)!r}, "w") as f:
-        json.dump({{k: sorted(set(v)) for k,v in _executed.items()}}, f)
-atexit.register(_dump)
-'''
     try:
-        shim.write_text(shim_code)
-        env = os.environ.copy()
-        env["PYTHONSTARTUP"] = str(shim)
         subprocess.run(
             cmd,
             cwd=str(repo),
             capture_output=True,
-            env=env,
-            timeout=120,
+            timeout=180,
+            shell=(sys.platform == "win32" and cmd[0] == "npm"),
         )
-        if trace_out.exists():
-            import json
-            raw = json.loads(trace_out.read_text())
-            return {k: set(v) for k, v in raw.items()}
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
-    finally:
-        shim.unlink(missing_ok=True)
-        trace_out.unlink(missing_ok=True)
+
+    lcov_candidates = [
+        repo / "coverage" / "lcov.info",
+        repo / "lcov.info",
+        repo / "coverage.lcov",
+        repo / ".coverage.lcov",
+    ]
+
+    for candidate in lcov_candidates:
+        if candidate.is_file():
+            res = parse_lcov(candidate, repo)
+            if res:
+                return res
 
     return {}
 
@@ -128,15 +122,19 @@ def check_coverage_gaps(
     claim: str,
 ) -> list[str]:
     """
-    Cross-reference executed lines against changed files.
+    Cross-reference executed lines against changed files across all languages.
     Returns a list of human-readable flag strings.
     """
     flags: list[str] = []
+    if not executed:
+        flags.append("Notice: No LCOV coverage report was generated by the test runner.")
+        return flags
+
     for rel_path in changed_files:
-        if not rel_path.endswith(".py"):
-            continue
-        if rel_path not in executed:
-            flags.append(f"{rel_path}: changed but never executed during test run")
+        posix_path = Path(rel_path).as_posix()
+        if posix_path not in executed:
+            flags.append(f"{posix_path}: changed but never executed during test run")
         else:
-            flags.append(f"{rel_path}: executed {len(executed[rel_path])} line(s) under trace")
+            flags.append(f"{posix_path}: executed {len(executed[posix_path])} line(s) under trace")
     return flags
+

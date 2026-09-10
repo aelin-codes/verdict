@@ -70,3 +70,20 @@ index 0000000..1111111 100644
     assert diffs[0].path == "foo.py"
     assert diffs[0].added == 2
     assert diffs[0].removed == 1
+
+
+def test_extract_mentioned_paths_tsx_and_posix(git_repo):
+    sub = git_repo / "src" / "components"
+    sub.mkdir(parents=True, exist_ok=True)
+    (sub / "Button.tsx").write_text("export const Button = () => null;\n")
+    paths = extract_mentioned_paths("Updated Button.tsx component", str(git_repo))
+    assert len(paths) == 1
+    assert paths[0] == "src/components/Button.tsx"
+    assert "\\" not in paths[0]
+
+
+def test_get_diff_includes_untracked_files(git_repo):
+    new_file = git_repo / "new_service.py"
+    new_file.write_text("print('hello world')\n")
+    diffs = get_diff(str(git_repo))
+    assert any(d.path == "new_service.py" and d.added == 1 for d in diffs)

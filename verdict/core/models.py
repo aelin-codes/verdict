@@ -10,6 +10,7 @@ class VerdictLevel(str, Enum):
     PASS = "PASS"
     SUSPICIOUS = "SUSPICIOUS"
     LIED = "LIED"
+    ERROR = "ERROR"
 
 
 class Citation(BaseModel):

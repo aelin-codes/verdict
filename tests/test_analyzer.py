@@ -56,3 +56,27 @@ def test_result_to_dict_has_required_keys(git_repo):
     d = result.to_dict()
     for key in ("verdict", "claim", "explanation", "citations", "static_flags", "trace_flags", "diff_summary"):
         assert key in d, f"Missing key: {key}"
+
+
+def test_error_on_invalid_git_repo(tmp_path):
+    result = analyze(str(tmp_path), claim="did some work")
+    assert result.level == VerdictLevel.ERROR
+    assert "Not a git repository" in result.explanation
+
+
+def test_lcov_coverage_tracer(git_repo):
+    from verdict.core.tracer import parse_lcov, check_coverage_gaps
+    lcov_file = git_repo / "lcov.info"
+    lcov_file.write_text(
+        "SF:auth.py\n"
+        "DA:1,5\n"
+        "DA:2,0\n"
+        "end_of_record\n"
+    )
+    executed = parse_lcov(lcov_file, git_repo)
+    assert "auth.py" in executed
+    assert 1 in executed["auth.py"]
+    assert 2 not in executed["auth.py"]
+
+    flags = check_coverage_gaps(executed, ["auth.py"], "claim")
+    assert any("executed 1 line(s)" in f for f in flags)
