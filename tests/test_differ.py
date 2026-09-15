@@ -87,3 +87,16 @@ def test_get_diff_includes_untracked_files(git_repo):
     new_file.write_text("print('hello world')\n")
     diffs = get_diff(str(git_repo))
     assert any(d.path == "new_service.py" and d.added == 1 for d in diffs)
+
+
+def test_extract_mentioned_paths_excludes_node_modules(git_repo):
+    node_mod = git_repo / "node_modules" / "busboy"
+    node_mod.mkdir(parents=True, exist_ok=True)
+    (node_mod / "route.ts").write_text("// dummy\n")
+    real_dir = git_repo / "src" / "api"
+    real_dir.mkdir(parents=True, exist_ok=True)
+    (real_dir / "route.ts").write_text("// real\n")
+
+    paths = extract_mentioned_paths("Updated route.ts in api", str(git_repo))
+    assert all("node_modules" not in p for p in paths)
+    assert "src/api/route.ts" in paths

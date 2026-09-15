@@ -46,6 +46,20 @@ _STOP_WORDS = {
     "valid", "real", "proper", "true", "false",
 }
 
+_BRAND_NAMES = frozenset({
+    # Platforms & services
+    "YouTube", "Twitch", "Supabase", "GitHub", "Vercel", "Google",
+    "Stripe", "Razorpay", "Discord", "Slack", "Twitter", "Reddit",
+    "AWS", "Azure", "Cloudflare",
+    # Frameworks & runtimes
+    "React", "Next", "Nextjs", "Vue", "Nuxt", "Angular", "Svelte",
+    "Node", "Nodejs", "Deno", "Bun", "TypeScript", "JavaScript",
+    "Python", "Rust", "Golang", "Docker", "Kubernetes",
+    # Common proper nouns in commit language
+    "Gemini", "OpenAI", "Anthropic", "Claude", "ChatGPT",
+})
+_BRAND_NAMES_LOWER = frozenset(b.lower() for b in _BRAND_NAMES)
+
 
 def check_claim_against_ast(claim: str, repo_path: str, changed_files: list[str]) -> list[ASTFlag]:
     """
@@ -192,7 +206,9 @@ def _extract_symbols(claim: str, exclude_stems: set[str] | None = None) -> set[s
     stems = {s.lower() for s in (exclude_stems or set())}
     return {
         s for s in raw
-        if s.lower() not in _STOP_WORDS and s.lower() not in stems
+        if s.lower() not in _STOP_WORDS
+        and s.lower() not in stems
+        and s.lower() not in _BRAND_NAMES_LOWER
     }
 
 

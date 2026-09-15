@@ -54,7 +54,7 @@ def analyze(
     static_flags: list[str] = []
 
     changed_paths = [d.path for d in diffs]
-    mentioned_paths = extract_mentioned_paths(claim, repo)
+    mentioned_paths = extract_mentioned_paths(claim, repo, changed_paths=changed_paths)
 
     # 2. Untouched-but-claimed files ------------------------------------
     citations: list[Citation] = []

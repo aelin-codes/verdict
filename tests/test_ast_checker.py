@@ -109,3 +109,27 @@ def test_check_missing_test_coverage_polyglot_ts(tmp_path):
     test_file.write_text("describe('auth', () => { it('works', () => {}); });\n")
     flags = check_missing_test_coverage("added unit tests", str(tmp_path), ["auth.test.ts"])
     assert flags == []
+
+
+def test_extract_symbols_skips_brand_names():
+    from verdict.core.ast_checker import _extract_symbols
+    symbols = _extract_symbols("Added live YouTube and Twitch sync via Supabase and Vercel")
+    assert "YouTube" not in symbols
+    assert "Twitch" not in symbols
+    assert "Supabase" not in symbols
+    assert "Vercel" not in symbols
+
+
+def test_check_claim_against_ast_brand_name_not_flagged(tmp_path, py_file):
+    from verdict.core.ast_checker import check_claim_against_ast
+    py_file("sync_service.py", """
+        def sync_data():
+            return True
+    """)
+    flags = check_claim_against_ast(
+        "Enforced YouTube and Twitch sync in sync_service.py",
+        str(tmp_path),
+        ["sync_service.py"],
+    )
+    assert flags == []
+

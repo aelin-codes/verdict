@@ -92,7 +92,13 @@ _EXTENSION_PATTERN = (
 )
 
 
-def extract_mentioned_paths(claim: str, repo_path: str) -> list[str]:
+_EXCLUDED_DIRS = frozenset({
+    "node_modules", ".git", ".next", "dist", "build",
+    "__pycache__", ".pytest_cache", ".ruff_cache", "coverage", "vendor"
+})
+
+
+def extract_mentioned_paths(claim: str, repo_path: str, changed_paths: list[str] | None = None) -> list[str]:
     """
     Scan the claim text for file paths that actually exist in the repo.
     Handles bare filenames, dotted module paths, and slash-separated paths.
@@ -100,6 +106,8 @@ def extract_mentioned_paths(claim: str, repo_path: str) -> list[str]:
     """
     repo = Path(repo_path).resolve()
     candidates: list[str] = []
+    claim_words = set(re.findall(r"\b[a-zA-Z0-9_\-]+\b", claim.lower()))
+    changed_set = set(changed_paths or [])
 
     # match things that look like paths
     for m in re.finditer(_EXTENSION_PATTERN, claim, re.I):
@@ -107,15 +115,25 @@ def extract_mentioned_paths(claim: str, repo_path: str) -> list[str]:
         # try exact match first
         p = repo / raw
         if p.exists() and p.is_file():
-            candidates.append(p.relative_to(repo).as_posix())
+            if not any(part in _EXCLUDED_DIRS for part in p.parts):
+                candidates.append(p.relative_to(repo).as_posix())
             continue
         # search recursively for matching path suffix
         raw_norm = Path(raw).as_posix().lower()
         hits = [
             h for h in repo.rglob(Path(raw).name)
-            if h.is_file() and h.relative_to(repo).as_posix().lower().endswith(raw_norm)
+            if h.is_file()
+            and h.relative_to(repo).as_posix().lower().endswith(raw_norm)
+            and not any(part in _EXCLUDED_DIRS for part in h.parts)
         ]
         if hits:
+            def _score_hit(h: Path) -> int:
+                posix_path = h.relative_to(repo).as_posix()
+                is_changed = 10 if posix_path in changed_set else 0
+                word_matches = sum(1 for part in h.relative_to(repo).parts[:-1] if part.lower() in claim_words)
+                return is_changed + word_matches
+
+            hits.sort(key=_score_hit, reverse=True)
             candidates.append(hits[0].relative_to(repo).as_posix())
 
     return list(dict.fromkeys(candidates))  # deduplicate, preserve order
